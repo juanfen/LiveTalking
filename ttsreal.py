@@ -930,6 +930,133 @@ class XTTS(BaseTTS):
         self.parent.put_audio_frame(np.zeros(self.chunk,np.float32),eventpoint)  
 
 ###########################################################################################
+class IndexStreamTTS(BaseTTS):
+    def __init__(self, opt, parent:BaseReal):
+        super().__init__(opt, parent)
+        self.api_url = getattr(opt, "INDEX_TTS_URL", None) or getattr(opt, "TTS_SERVER", "")
+        self.voice = (
+            getattr(opt, "INDEX_TTS_VOICE", None)
+            or getattr(opt, "REF_FILE", None)
+            or "晓伊"
+        )
+        self.source_sample_rate = int(getattr(opt, "INDEX_TTS_SAMPLE_RATE", 24000))
+        self.request_timeout = float(getattr(opt, "INDEX_TTS_TIMEOUT", 60))
+
+    def txt_to_audio(self,msg:tuple[str, dict]):
+        text, textevent = msg
+        if not self.api_url:
+            logger.error("IndexStreamTTS api url is empty")
+            return
+
+        start = time.perf_counter()
+        payload = {"text": text, "character": self.voice}
+        first = True
+        pcm_bytes = bytearray()
+        samples_cache = np.empty(0, dtype=np.float32)
+
+        def emit_ready_samples():
+            nonlocal first, samples_cache
+            while samples_cache.shape[0] >= self.chunk and self.state == State.RUNNING:
+                eventpoint = {}
+                if first:
+                    eventpoint = {"status": "start", "text": text}
+                    eventpoint.update(**textevent)
+                    first = False
+                self.parent.put_audio_frame(samples_cache[: self.chunk], eventpoint)
+                samples_cache = samples_cache[self.chunk :]
+
+        try:
+            with requests.post(
+                self.api_url,
+                json=payload,
+                stream=True,
+                timeout=(5, self.request_timeout),
+            ) as response:
+                post_time = time.perf_counter()
+                logger.info("index-stream tts POST time: %.3fs", post_time - start)
+                if response.status_code != 200:
+                    logger.error("index-stream tts error:%s", response.text)
+                    return
+
+                for chunk in response.iter_content(chunk_size=4096):
+                    if self.state != State.RUNNING:
+                        break
+                    if not chunk:
+                        continue
+                    if first:
+                        logger.info(
+                            "index-stream tts first chunk time: %.3fs",
+                            time.perf_counter() - start,
+                        )
+                    pcm_bytes.extend(chunk)
+                    process_len = len(pcm_bytes) - (len(pcm_bytes) % 2)
+                    if process_len < 2:
+                        continue
+
+                    raw = bytes(pcm_bytes[:process_len])
+                    del pcm_bytes[:process_len]
+                    samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+                    if (
+                        self.source_sample_rate != self.sample_rate
+                        and samples.shape[0] > 0
+                    ):
+                        samples = resampy.resample(
+                            x=samples,
+                            sr_orig=self.source_sample_rate,
+                            sr_new=self.sample_rate,
+                        ).astype(np.float32)
+                    samples_cache = (
+                        samples
+                        if samples_cache.size == 0
+                        else np.concatenate((samples_cache, samples))
+                    )
+                    emit_ready_samples()
+
+                if self.state == State.RUNNING and pcm_bytes:
+                    raw = bytes(pcm_bytes)
+                    if len(raw) % 2:
+                        raw = raw[:-1]
+                    if raw:
+                        samples = (
+                            np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+                        )
+                        if self.source_sample_rate != self.sample_rate:
+                            samples = resampy.resample(
+                                x=samples,
+                                sr_orig=self.source_sample_rate,
+                                sr_new=self.sample_rate,
+                            ).astype(np.float32)
+                        samples_cache = (
+                            samples
+                            if samples_cache.size == 0
+                            else np.concatenate((samples_cache, samples))
+                        )
+                        emit_ready_samples()
+
+                if self.state == State.RUNNING and samples_cache.shape[0] > 0:
+                    tail = np.zeros(self.chunk, dtype=np.float32)
+                    tail[: samples_cache.shape[0]] = samples_cache[: self.chunk]
+                    eventpoint = {}
+                    if first:
+                        eventpoint = {"status": "start", "text": text}
+                        eventpoint.update(**textevent)
+                        first = False
+                    self.parent.put_audio_frame(tail, eventpoint)
+
+                if self.state == State.RUNNING:
+                    eventpoint = {"status": "end", "text": text}
+                    eventpoint.update(**textevent)
+                    self.parent.put_audio_frame(
+                        np.zeros(self.chunk, np.float32), eventpoint
+                    )
+                    logger.info(
+                        "index-stream tts total time: %.3fs",
+                        time.perf_counter() - start,
+                    )
+        except Exception:
+            logger.exception("index-stream tts failed")
+
+###########################################################################################
 class AzureTTS(BaseTTS):
     CHUNK_SIZE = 640  # 16kHz, 20ms, 16-bit Mono PCM size
     def __init__(self, opt, parent):

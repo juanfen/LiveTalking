@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LiveTalking Voice Chat</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --ink: #202124;
+            --muted: #5f6368;
+            --line: #d7dce2;
+            --panel: #ffffff;
+            --accent: #0b7fab;
+            --accent-strong: #075f80;
+            --danger: #b3261e;
+            --ok: #137333;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Arial, "Microsoft YaHei", sans-serif;
+            color: var(--ink);
+            background: #f6f8fa;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--line);
+            background: #ffffff;
+        }
+
+        header img {
+            width: 56px;
+            height: 56px;
+            object-fit: cover;
+            border-radius: 8px;
+        }
+
+        h1 {
+            margin: 0 0 4px;
+            font-size: 24px;
+            line-height: 1.2;
+        }
+
+        p {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 380px;
+            gap: 20px;
+            padding: 20px;
+        }
+
+        .stage,
+        .side {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+        }
+
+        .stage {
+            padding: 16px;
+        }
+
+        video {
+            display: block;
+            width: 100%;
+            max-height: calc(100vh - 180px);
+            background: #111;
+            border-radius: 8px;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 12px;
+        }
+
+        .side {
+            display: flex;
+            flex-direction: column;
+            min-height: 520px;
+            max-height: calc(100vh - 140px);
+            overflow: hidden;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            padding: 14px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        button {
+            min-height: 42px;
+            border: 1px solid var(--accent);
+            border-radius: 8px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 15px;
+            cursor: pointer;
+        }
+
+        button.secondary {
+            background: #fff;
+            color: var(--accent);
+        }
+
+        button.danger {
+            border-color: var(--danger);
+            background: var(--danger);
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .status {
+            display: grid;
+            gap: 8px;
+            padding: 14px;
+            border-bottom: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 14px;
+        }
+
+        .status strong {
+            color: var(--ink);
+        }
+
+        .messages {
+            flex: 1;
+            overflow: auto;
+            min-height: 0;
+            max-height: 380px;
+            padding: 14px;
+            overscroll-behavior: contain;
+        }
+
+        .message {
+            margin-bottom: 10px;
+            padding: 10px 12px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #fbfcfe;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+
+        .message.user {
+            border-color: #a8d5e5;
+            background: #eef8fb;
+        }
+
+        .message.assistant {
+            border-color: #b7dfc2;
+            background: #f1fbf4;
+        }
+
+        form {
+            display: grid;
+            gap: 10px;
+            padding: 14px;
+            border-top: 1px solid var(--line);
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 86px;
+            resize: vertical;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 10px;
+            font: inherit;
+        }
+
+        @media (max-width: 900px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+
+            .side {
+                min-height: 420px;
+                max-height: none;
+            }
+
+            .messages {
+                max-height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <img src="/assets/LiveTalking-logo.jpg" alt="LiveTalking" />
+        <div>
+            <h1>语音数字人对话</h1>
+            <p>连接数字人后开启麦克风，说完停顿约 1 秒会自动识别并回复。</p>
+        </div>
+    </header>
+
+    <main>
+        <section class="stage">
+            <video id="video" autoplay playsinline></video>
+            <audio id="audio" autoplay></audio>
+        </section>
+
+        <aside class="side">
+            <div class="controls">
+                <button id="start" type="button">连接数字人</button>
+                <button id="stop" type="button" class="danger" style="display:none">断开连接</button>
+                <button id="voice-start" type="button" disabled>开启麦克风</button>
+                <button id="voice-stop" type="button" class="secondary" disabled>关闭麦克风</button>
+            </div>
+
+            <div class="status">
+                <div>连接状态：<strong id="connection-status">未连接</strong></div>
+                <div>语音状态：<strong id="voice-status">未开启</strong></div>
+                <div>会话 ID：<strong id="session-label">0</strong></div>
+            </div>
+
+            <div class="messages" id="messages"></div>
+
+            <form id="text-form">
+                <textarea id="text-message" placeholder="也可以在这里输入文字测试对话"></textarea>
+                <button type="submit">发送文字</button>
+            </form>
+        </aside>
+    </main>
+
+    <input type="hidden" id="sessionid" value="0" />
+    <input type="checkbox" id="use-stun" hidden />
+
+    <script src="client.js"></script>
+    <script>
+        let voiceWs = null;
+        let audioContext = null;
+        let processor = null;
+        let micSource = null;
+        let micStream = null;
+        let voiceEnabled = false;
+        let currentAssistantMessage = null;
+
+        const messages = document.getElementById("messages");
+        const voiceStatus = document.getElementById("voice-status");
+        const connectionStatus = document.getElementById("connection-status");
+        const sessionLabel = document.getElementById("session-label");
+        const voiceStartBtn = document.getElementById("voice-start");
+        const voiceStopBtn = document.getElementById("voice-stop");
+
+        function addMessage(text, type) {
+            const item = document.createElement("div");
+            item.className = "message " + (type || "system");
+            item.textContent = text;
+            messages.appendChild(item);
+            messages.scrollTop = messages.scrollHeight;
+            return item;
+        }
+
+        function appendAssistantChunk(text) {
+            if (!currentAssistantMessage) {
+                currentAssistantMessage = addMessage("数字人：" + text, "assistant");
+            } else {
+                currentAssistantMessage.textContent += text;
+                messages.scrollTop = messages.scrollHeight;
+            }
+        }
+
+        function setVoiceStatus(text) {
+            voiceStatus.textContent = text;
+        }
+
+        function getMicrophoneStream(constraints) {
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                return navigator.mediaDevices.getUserMedia(constraints);
+            }
+
+            const legacyGetUserMedia = navigator.getUserMedia
+                || navigator.webkitGetUserMedia
+                || navigator.mozGetUserMedia
+                || navigator.msGetUserMedia;
+
+            if (legacyGetUserMedia) {
+                return new Promise((resolve, reject) => {
+                    legacyGetUserMedia.call(navigator, constraints, resolve, reject);
+                });
+            }
+
+            const secureTip = window.isSecureContext
+                ? "请确认浏览器支持麦克风采集。"
+                : "当前页面不是安全上下文。请使用 HTTPS，或在运行服务的同一台机器上用 localhost 访问。";
+            return Promise.reject(new Error("无法访问麦克风。" + secureTip));
+        }
+
+        function waitForSessionId() {
+            return new Promise((resolve, reject) => {
+                const startedAt = Date.now();
+                const timer = setInterval(() => {
+                    const sessionid = parseInt(document.getElementById("sessionid").value || "0", 10);
+                    if (sessionid > 0) {
+                        clearInterval(timer);
+                        sessionLabel.textContent = String(sessionid);
+                        resolve(sessionid);
+                    } else if (Date.now() - startedAt > 30000) {
+                        clearInterval(timer);
+                        reject(new Error("等待会话 ID 超时"));
+                    }
+                }, 200);
+            });
+        }
+
+        function downsample(input, inputRate, targetRate) {
+            if (inputRate === targetRate) {
+                return input;
+            }
+            const ratio = inputRate / targetRate;
+            const outputLength = Math.floor(input.length / ratio);
+            const output = new Float32Array(outputLength);
+            for (let i = 0; i < outputLength; i++) {
+                const start = Math.floor(i * ratio);
+                const end = Math.min(Math.floor((i + 1) * ratio), input.length);
+                let sum = 0;
+                let count = 0;
+                for (let j = start; j < end; j++) {
+                    sum += input[j];
+                    count++;
+                }
+                output[i] = count > 0 ? sum / count : 0;
+            }
+            return output;
+        }
+
+        function floatToInt16(input) {
+            const output = new Int16Array(input.length);
+            for (let i = 0; i < input.length; i++) {
+                const s = Math.max(-1, Math.min(1, input[i]));
+                output[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+            return output;
+        }
+
+        async function startVoice(sessionid) {
+            if (voiceEnabled) {
+                return;
+            }
+
+            const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+            voiceWs = new WebSocket(`${protocol}://${window.location.host}/ws/audio?sessionid=${sessionid}`);
+            voiceWs.binaryType = "arraybuffer";
+
+            voiceWs.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === "ready") {
+                    setVoiceStatus("已连接语音服务");
+                } else if (data.type === "speech_start") {
+                    setVoiceStatus("正在聆听");
+                } else if (data.type === "speech_end") {
+                    setVoiceStatus("正在识别");
+                } else if (data.type === "asr") {
+                    currentAssistantMessage = null;
+                    addMessage("我：" + data.text, "user");
+                    setVoiceStatus("正在思考");
+                } else if (data.type === "answer_chunk") {
+                    appendAssistantChunk(data.text);
+                    setVoiceStatus("数字人回复中");
+                } else if (data.type === "done") {
+                    currentAssistantMessage = null;
+                    setVoiceStatus("等待说话");
+                } else if (data.type === "asr_empty") {
+                    setVoiceStatus("未识别到有效语音");
+                } else if (data.type === "error") {
+                    addMessage("错误：" + data.message, "system");
+                    setVoiceStatus("语音服务异常");
+                } else if (data.type === "session_lost") {
+                    addMessage("数字人连接已断开，请重新连接后再开启麦克风。", "system");
+                    setVoiceStatus("会话已断开");
+                    stopVoice();
+                }
+            };
+
+            await new Promise((resolve, reject) => {
+                voiceWs.onopen = resolve;
+                voiceWs.onerror = () => reject(new Error("语音 WebSocket 连接失败"));
+            });
+
+            micStream = await getMicrophoneStream({
+                audio: {
+                    channelCount: 1,
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            micSource = audioContext.createMediaStreamSource(micStream);
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            processor.onaudioprocess = (event) => {
+                if (!voiceEnabled || !voiceWs || voiceWs.readyState !== WebSocket.OPEN) {
+                    return;
+                }
+                const input = event.inputBuffer.getChannelData(0);
+                const pcm16k = downsample(input, audioContext.sampleRate, 16000);
+                const pcm16 = floatToInt16(pcm16k);
+                voiceWs.send(pcm16.buffer);
+            };
+
+            micSource.connect(processor);
+            processor.connect(audioContext.destination);
+            voiceEnabled = true;
+            voiceStartBtn.disabled = true;
+            voiceStopBtn.disabled = false;
+            setVoiceStatus("等待说话");
+        }
+
+        async function stopVoice() {
+            voiceEnabled = false;
+            if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+                voiceWs.send(JSON.stringify({ type: "stop" }));
+                voiceWs.close();
+            }
+            voiceWs = null;
+            if (processor) {
+                processor.disconnect();
+                processor = null;
+            }
+            if (micSource) {
+                micSource.disconnect();
+                micSource = null;
+            }
+            if (micStream) {
+                micStream.getTracks().forEach((track) => track.stop());
+                micStream = null;
+            }
+            if (audioContext) {
+                await audioContext.close();
+                audioContext = null;
+            }
+            voiceStartBtn.disabled = parseInt(document.getElementById("sessionid").value || "0", 10) <= 0;
+            voiceStopBtn.disabled = true;
+            setVoiceStatus("未开启");
+        }
+
+        document.getElementById("start").addEventListener("click", async () => {
+            connectionStatus.textContent = "连接中";
+            start();
+            try {
+                const sessionid = await waitForSessionId();
+                connectionStatus.textContent = "已连接";
+                voiceStartBtn.disabled = false;
+                addMessage("数字人已连接，可以开启麦克风。", "system");
+                await startVoice(sessionid);
+            } catch (error) {
+                connectionStatus.textContent = "连接失败";
+                addMessage(error.message, "system");
+                setVoiceStatus("麦克风未开启");
+            }
+        });
+
+        document.getElementById("stop").addEventListener("click", async () => {
+            await stopVoice();
+            stop();
+            connectionStatus.textContent = "未连接";
+            document.getElementById("sessionid").value = "0";
+            sessionLabel.textContent = "0";
+            voiceStartBtn.disabled = true;
+        });
+
+        voiceStartBtn.addEventListener("click", async () => {
+            const sessionid = parseInt(document.getElementById("sessionid").value || "0", 10);
+            if (sessionid > 0) {
+                try {
+                    await startVoice(sessionid);
+                } catch (error) {
+                    addMessage(error.message, "system");
+                    setVoiceStatus("麦克风未开启");
+                }
+            }
+        });
+
+        voiceStopBtn.addEventListener("click", stopVoice);
+
+        document.getElementById("text-form").addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const textArea = document.getElementById("text-message");
+            const text = textArea.value.trim();
+            const sessionid = parseInt(document.getElementById("sessionid").value || "0", 10);
+            if (!text || sessionid <= 0) {
+                return;
+            }
+            addMessage("我：" + text, "user");
+            textArea.value = "";
+            await fetch("/human", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    text,
+                    type: "chat",
+                    interrupt: true,
+                    sessionid
+                })
+            });
+        });
+
+        window.addEventListener("beforeunload", () => {
+            if (voiceWs && voiceWs.readyState === WebSocket.OPEN) {
+                voiceWs.close();
+            }
+        });
+    </script>
+</body>
+</html>
